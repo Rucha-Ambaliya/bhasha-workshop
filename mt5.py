@@ -1,155 +1,122 @@
-# mt5_hindi_grammar_with_metrics.py
-
-import torch
-from datasets import load_dataset
-import evaluate
-from transformers import MT5ForConditionalGeneration, T5Tokenizer
-from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
+import pandas as pd
 import numpy as np
+from datasets import Dataset, DatasetDict
+from transformers import (
+    MT5ForConditionalGeneration,
+    MT5Tokenizer,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    DataCollatorForSeq2Seq
+)
+import evaluate
+import torch
 
-# -----------------------------
-# Check GPU
-# -----------------------------
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print("Using device:", device)
+# -------------------------------
+# Load CSVs
+# -------------------------------
+train_df = pd.read_csv("train.csv")
+test_df = pd.read_csv("test.csv")
 
-# -----------------------------
-# Load Model and Tokenizer
-# -----------------------------
-model_name = "google/mt5-small"
-tokenizer = T5Tokenizer.from_pretrained(model_name)
+# Rename columns to match expected keys
+train_df = train_df.rename(columns={"Input Sentences": "input_text", "Output Sentences": "target_text"})
+test_df = test_df.rename(columns={"Input Sentences": "input_text", "Output Sentences": "target_text"})
+
+# Convert to HuggingFace Dataset
+dataset = DatasetDict({
+    "train": Dataset.from_pandas(train_df),
+    "test": Dataset.from_pandas(test_df)
+})
+
+# -------------------------------
+# Load Tokenizer & Model
+# -------------------------------
+model_name = "google/mt5-small"   # Try mt5-base for better accuracy
+tokenizer = MT5Tokenizer.from_pretrained(model_name, legacy=False)
 model = MT5ForConditionalGeneration.from_pretrained(model_name)
-model.to(device)
 
-# -----------------------------
-# Task Prefix
-# -----------------------------
-TASK_PREFIX = "grammar correction: "
-
-# -----------------------------
-# Load Dataset (CSV: input,target)
-# -----------------------------
-dataset = load_dataset("csv", data_files={"train": "Hindi/train.csv", "test": "Hindi/dev.csv"})
-
-# -----------------------------
-# Preprocessing function
-# -----------------------------
-def preprocess(batch):
-    inputs = [TASK_PREFIX + text for text in batch["Input sentence"]]
-    model_inputs = tokenizer(inputs, max_length=128, truncation=True, padding="max_length")
-    
-    labels = tokenizer(batch["Output sentence"], max_length=128, truncation=True, padding="max_length")
+# -------------------------------
+# Preprocessing
+# -------------------------------
+def preprocess_function(examples):
+    # Encode inputs
+    model_inputs = tokenizer(
+        examples["input_text"], max_length=128, truncation=True
+    )
+    # Encode targets with text_target
+    labels = tokenizer(
+        text_target=examples["target_text"], max_length=128, truncation=True
+    )
     model_inputs["labels"] = labels["input_ids"]
-    
-    # replace padding token id's in labels by -100 to ignore in loss
-    model_inputs["labels"] = [
-        [(label if label != tokenizer.pad_token_id else -100) for label in labels_seq]
-        for labels_seq in model_inputs["labels"]
-    ]
-    
     return model_inputs
 
-tokenized_dataset = dataset.map(preprocess, batched=True)
+tokenized_datasets = dataset.map(preprocess_function, batched=True)
 
-# -----------------------------
-# Metrics Functions
-# -----------------------------
-def exact_match(preds, labels):
-    correct = 0
-    for p, l in zip(preds, labels):
-        if p.strip() == l.strip():
-            correct += 1
-    return correct / len(preds)
-
-def char_accuracy(preds, labels):
-    total_chars = 0
-    correct_chars = 0
-    for p, l in zip(preds, labels):
-        for pc, lc in zip(p, l):
-            total_chars += 1
-            if pc == lc:
-                correct_chars += 1
-        # remaining unmatched characters
-        total_chars += abs(len(p) - len(l))
-    return correct_chars / total_chars
-
-bleu = evaluate.load("bleu")
+# -------------------------------
+# Data Collator & Metrics
+# -------------------------------
+data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
+metric = evaluate.load("sacrebleu")
 
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
 
+    # Convert logits to token IDs if needed
+    if isinstance(predictions, tuple):
+        predictions = predictions[0]
+    predictions = np.argmax(predictions, axis=-1)
+
     # Decode predictions
     decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
 
-    # Replace -100 in labels with pad_token_id for decoding
+    # Replace -100 with pad_token_id before decoding
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
-    # Exact match
-    exact = exact_match(decoded_preds, decoded_labels)
-    # Character-level accuracy
-    char_acc = char_accuracy(decoded_preds, decoded_labels)
-    
-    # BLEU metric
-    references = [[l.split()] for l in decoded_labels]
-    preds_tokens = [p.split() for p in decoded_preds]
-    bleu_score = bleu.compute(predictions=preds_tokens, references=references)["bleu"]
+    # sacrebleu expects list of list for references
+    decoded_labels = [[l] for l in decoded_labels]
 
-    return {"exact_match": exact, "char_accuracy": char_acc, "bleu": bleu_score}
+    return metric.compute(predictions=decoded_preds, references=decoded_labels)
 
-# -----------------------------
+# -------------------------------
 # Training Arguments
-# -----------------------------
+# -------------------------------
 training_args = Seq2SeqTrainingArguments(
-    output_dir="./mt5-hindi-grammar",
-    # evaluation_strategy="epoch",
-    save_strategy="epoch",
-    learning_rate=2e-5,
-    per_device_train_batch_size=2,
-    per_device_eval_batch_size=2,
+    output_dir="./mt5-corrector",
+    eval_strategy="epoch",
+    learning_rate=5e-5,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
     weight_decay=0.01,
     save_total_limit=2,
-    num_train_epochs=3,
+    num_train_epochs=5,
     predict_with_generate=True,
-    fp16=True,             # mixed precision for GPU
-    logging_dir='./logs',
-    logging_steps=100,
+    logging_dir="./logs",
+    logging_steps=50
 )
 
-# -----------------------------
+# -------------------------------
 # Trainer
-# -----------------------------
+# -------------------------------
 trainer = Seq2SeqTrainer(
     model=model,
     args=training_args,
-    train_dataset=tokenized_dataset["train"],
-    eval_dataset=tokenized_dataset["test"],
+    train_dataset=tokenized_datasets["train"],
+    eval_dataset=tokenized_datasets["test"],
     tokenizer=tokenizer,
+    data_collator=data_collator,
     compute_metrics=compute_metrics
 )
 
-# -----------------------------
+# -------------------------------
 # Train
-# -----------------------------
+# -------------------------------
 trainer.train()
 
-# -----------------------------
-# Evaluate on Test Set
-# -----------------------------
-metrics = trainer.evaluate()
-print("\n=== Evaluation Metrics on Test Set ===")
-print("Exact Match Accuracy :", metrics["eval_exact_match"])
-print("Character-level Accuracy :", metrics["eval_char_accuracy"])
-print("BLEU Score :", metrics["eval_bleu"])
-
-# -----------------------------
-# Test Example
-# -----------------------------
-def correct_grammar(sentence):
-    inputs = tokenizer(TASK_PREFIX + sentence, return_tensors="pt", truncation=True).to(device)
-    outputs = model.generate(**inputs, max_length=50)
-    return tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-test_sentence = "वह घर जा रही हूँ"
-print("\nInput Sentence :", test_sentence)
-print("Corrected Sentence :", correct_grammar(test_sentence))
+# -------------------------------
+# Test Inference
+# -------------------------------
+test_sentence = "कहते है 'शिक्षा शेरनी को वो दुध है जिसने जितना पिया उतना ही दहाडा है'।"
+inputs = tokenizer(test_sentence, return_tensors="pt", padding=True, truncation=True).to(model.device)
+outputs = model.generate(**inputs, max_length=128)
+print("Input: ", test_sentence)
+print("Prediction: ", tokenizer.decode(outputs[0], skip_special_tokens=True))
