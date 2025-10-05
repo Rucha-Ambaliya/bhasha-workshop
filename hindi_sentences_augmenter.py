@@ -6,7 +6,7 @@ from tqdm import tqdm
 # ------------------------------
 # Load dataset
 # ------------------------------
-df = pd.read_csv("hindi_sentences_10k.csv")
+df = pd.read_csv("hindi_sentences_augmented_10k.csv")
 
 # Ensure column name is correct
 if "Output Sentences" not in df.columns:
@@ -87,5 +87,5 @@ df.loc[df_subset.index, "Input Sentences"] = df_subset["Input Sentences"]
 # ------------------------------
 # Save in-place to the same CSV
 # ------------------------------
-df.to_csv("10k_augmented_hindi_sentences.csv", index=False)
+df.to_csv("hindi_sentences_augmented_10k.csv", index=False)
 print("✅ In-place augmentation complete! File updated at hindi_sentences_10k.csv")
