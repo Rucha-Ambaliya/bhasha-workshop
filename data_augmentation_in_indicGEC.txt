@@ -1,0 +1,19 @@
+Two types of augmentation
+1. one at character level
+2. one at word level
+ Types of Augmentation
+ 1. Swap
+ 2. Insert
+ 3. Delete
+ 
+ I am studying in Surat .
+ 1. Word Level
+ 1.1 Delete - I studying in Surat .
+ 1.2 Swap - Studying I am i Surat .
+ 1.3 Insert - I am man studying in Surat .
+ 
+ 2. Character Level
+ 2.1 Delete - I am studing in Surat .
+ 2.2 Swap - I ma studying in Surat .
+ 2.3 Insert - Ia am studying in Surat .
+ 
