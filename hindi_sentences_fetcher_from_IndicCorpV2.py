@@ -2,15 +2,15 @@ from datasets import load_dataset
 import csv
 
 output_file = "hindi_sentences_augmented_10k.csv"
-max_sentences = 10_000  # take 10k sentences
+max_sentences = 10_000
+max_length = 35  # or 300 depending on task, tokens not chars
+min_length = 5   # optional: skip very short lines
 
 try:
     with open(output_file, "w", newline='', encoding="utf-8") as f:
         writer = csv.writer(f)
-        # ✅ Write header with both columns
         writer.writerow(["Input Sentences", "Output Sentences"])
 
-        # Stream the Hindi subset
         dataset = load_dataset(
             "ai4bharat/IndicCorpV2",
             "indiccorp_v2",
@@ -20,20 +20,18 @@ try:
 
         count = 0
         for sample in dataset:
-            # Handle text depending on structure
-            text = sample if isinstance(sample, str) else sample.get("text", "")
-            text = text.strip()
+            text = sample.get("text", "").strip()
+            if not text:
+                continue
 
-            if text:
-                # ✅ Write same sentence to both Input and Output
+            # ✅ Filter by length (character-based for simplicity)
+            if min_length <= len(text.split()) <= max_length:
                 writer.writerow([text, text])
                 count += 1
 
-                # Show progress every 500 sentences
                 if count % 500 == 0:
                     print(f"✅ {count} sentences written...")
 
-                # Stop after 10k sentences
                 if count >= max_sentences:
                     break
 
