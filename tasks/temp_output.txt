@@ -1,0 +1,21 @@
+<Sentence id='1'>
+1	वह	unk
+2	केवल	unk
+3	एक	unk
+4	रानी	unk
+5	नहीं	unk
+6	थीं	unk
+7	बल्कि	unk
+8	एक	unk
+9	विचारशील	unk
+10	,	unk
+11	साहसी	unk
+12	और	unk
+13	आत्मसम्मान	unk
+14	की	unk
+15	प्रतीक	unk
+16	महिला	unk
+17	हैं	unk
+18	.	unk
+</Sentence>
+

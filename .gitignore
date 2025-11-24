@@ -207,15 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 # others
-venv311/
 venv312/
-converter.py
-encoder_decoder.py
-test.csv
-train.csv
 final-encoder-decoder-model/
-results/
-temp_input.txt
-temp_output.txt
-Hindi/
-mt5-hindi-grammar/
+mt5_trained_models/
